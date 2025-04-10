@@ -118,7 +118,7 @@ class ListaReproduccion:
         with open(archivo, "r", encoding="utf-8") as f:
             datos = json.load(f)
             for d in datos:
-                if "file_path" in d and not os.path.exists(d["file_path"]):
+                if "file_path" in d and d["file_path"] and not os.path.exists(d["file_path"]):
                     d["file_path"] = None  # Ignora archivos que ya no existen
                 self.agregar(NodoCancion.from_dict(d))  # Agrega a la lista
 
