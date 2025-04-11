@@ -591,7 +591,7 @@ def main(page: ft.Page):  # Función principal de la app, recibe la página de F
             ultimo_intervalo_imprimido = -1  
 
             while reproduciendo:
-                print(boton_pausa.icon == ft.icons.PLAY_ARROW)
+                #print(boton_pausa.icon == ft.icons.PLAY_ARROW)
                 # Marca el tiempo actual en cada iteración
                 tiempo_actual = time.time()
                 
