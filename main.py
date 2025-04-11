@@ -250,7 +250,7 @@ def obtener_info_cancion(texto):
         raise Exception(f"Error al obtener información: {str(e)}")
 
 def main(page: ft.Page):  # Función principal de la app, recibe la página de Flet
-    global lista_reproduccion, player, reproduciendo  # Se usan variables globales para controlar el estado
+    global lista_reproduccion, player, reproduciendo   # Se usan variables globales para controlar el estado
 
     # Configuración general de la página
     page.title = "🎵 Reproductor Musical MP3"  # Título de la ventana
@@ -563,6 +563,7 @@ def main(page: ft.Page):  # Función principal de la app, recibe la página de F
             return None  # Si falla, manejaremos este caso
 
     def reproducir_mp3(file_path):
+        
         global player, reproduciendo
         
         # 1. Obtener duración real del archivo
@@ -580,17 +581,42 @@ def main(page: ft.Page):  # Función principal de la app, recibe la página de F
         
         try:
             # 3. Bucle basado únicamente en el tiempo
+            reproduciendo = True     # Controla si se sigue reproduciendo
+
+            # Variables para el contador de tiempo real de reproducción
+            tiempo_transcurrido = 0.0
+            ultimo_reloj = time.time()
+
+            # Variable auxiliar para imprimir cada 10 segundos (evitar duplicados)
+            ultimo_intervalo_imprimido = -1  
+
             while reproduciendo:
-                tiempo_actual = time.time() - inicio
+                print(boton_pausa.icon == ft.icons.PLAY_ARROW)
+                # Marca el tiempo actual en cada iteración
+                tiempo_actual = time.time()
                 
-                # Cambiar 1 segundo antes del final
-                if tiempo_actual >= duracion - 1:
-                    print(f"Cambiando 1s antes del final (Tiempo: {tiempo_actual:.2f}s)")
-                    siguiente()
-                    break
+                if not (boton_pausa.icon == ft.icons.PLAY_ARROW):
+                    # Calcula el tiempo transcurrido solo durante la reproducción
+                    delta = tiempo_actual - ultimo_reloj
+                    tiempo_transcurrido += delta
                     
-                # Solo para evitar uso excesivo de CPU
-                time.sleep(0.1)  # Verificación cada 100ms
+                    # Verificar si se ha alcanzado 1 segundo antes del final
+                    if tiempo_transcurrido >= duracion - 1:
+                        print(f"Cambiando 1s antes del final (Tiempo: {tiempo_transcurrido:.2f}s)")
+                        siguiente()  # Llamada a la función que cambia la pista
+                        break
+                    
+                    # Imprimir el progreso cada 10 segundos, evitando repetición
+                    intervalo_actual = int(tiempo_transcurrido // 10)
+                    if intervalo_actual > ultimo_intervalo_imprimido:
+                        print(f"Reproduciendo... {tiempo_transcurrido:.1f}s / {duracion:.1f}s")
+                        ultimo_intervalo_imprimido = intervalo_actual
+                
+                # Actualizamos el reloj de la última iteración
+                ultimo_reloj = tiempo_actual
+                
+                # Retardo para evitar consumo excesivo de CPU
+                time.sleep(0.1)
         
         except Exception as e:
             print(f"Error: {e}")
@@ -634,6 +660,7 @@ def main(page: ft.Page):  # Función principal de la app, recibe la página de F
 
     # Función para pausar la reproducción
     def pausar(_=None):
+        
         global player  # Usamos el reproductor global
         if player:
             player.toggle_pause()  # Alternamos entre pausar y reanudar
