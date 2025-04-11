@@ -5,6 +5,7 @@ import threading  # Para ejecutar tareas en segundo plano
 import time  # Funciones relacionadas con el tiempo
 import json  # Lectura y escritura de datos en formato JSON
 import os  # Operaciones con el sistema de archivos
+import subprocess
 
 estado_pausado = False  # Variable global que indica si la canción está pausada
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -547,20 +548,57 @@ def main(page: ft.Page):  # Función principal de la app, recibe la página de F
         page.snack_bar.open = True  # Lo abrimos
         page.update()  # Actualizamos la página
 
-    # Función que reproduce un archivo MP3 usando ffpyplayer
-    def reproducir_mp3(file_path):
-        global player, reproduciendo  # Usamos las variables globales
+    def obtener_duracion(file_path):
+        """Obtiene la duración exacta del MP3 usando ffprobe"""
         try:
-            player = MediaPlayer(file_path)  # Creamos el reproductor con el archivo
-            while reproduciendo and player:  # Mientras siga reproduciendo y exista el reproductor
-                frame, val = player.get_frame()  # Obtenemos el siguiente frame de audio
-                if val == 'eof':  # Si llega al final del archivo
-                    siguiente()  # Pasamos a la siguiente canción
-                    break  # Salimos del bucle
-                time.sleep(0.01)  # Esperamos un poco para no bloquear el hilo
+            cmd = [
+                'ffprobe', '-v', 'error', 
+                '-show_entries', 'format=duration', 
+                '-of', 'default=noprint_wrappers=1:nokey=1', 
+                file_path
+            ]
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            return float(result.stdout.strip())
+        except:
+            return None  # Si falla, manejaremos este caso
+
+    def reproducir_mp3(file_path):
+        global player, reproduciendo
+        
+        # 1. Obtener duración real del archivo
+        duracion = obtener_duracion(file_path)
+        
+        if duracion is None:
+            print("¡Error! No se pudo obtener la duración. Usando valor por defecto (3 mins)")
+            duracion = 180  # 3 minutos por defecto
+        
+        print(f"Duración detectada: {duracion:.2f} segundos")
+        
+        # 2. Configurar reproductor (ignorando frames)
+        player = MediaPlayer(file_path)
+        inicio = time.time()
+        
+        try:
+            # 3. Bucle basado únicamente en el tiempo
+            while reproduciendo:
+                tiempo_actual = time.time() - inicio
+                
+                # Cambiar 1 segundo antes del final
+                if tiempo_actual >= duracion - 1:
+                    print(f"Cambiando 1s antes del final (Tiempo: {tiempo_actual:.2f}s)")
+                    siguiente()
+                    break
+                    
+                # Solo para evitar uso excesivo de CPU
+                time.sleep(0.1)  # Verificación cada 100ms
+        
         except Exception as e:
-            print(f"Error de reproducción: {e}")  # Mostramos el error en consola
-            siguiente()  # Pasamos a la siguiente canción
+            print(f"Error: {e}")
+            siguiente()
+        finally:
+            if player:
+                player.close_player()
+            print(f"Reproducción finalizada. Tiempo total: {time.time() - inicio:.2f}s")
 
     # Función para reproducir la canción actual (verificada)
     def tocar_actual():
