@@ -1,30 +1,32 @@
-import flet as ft  # Framework para interfaces gráficas
-from ffpyplayer.player import MediaPlayer  # Reproductor de audio
-import yt_dlp  # Descarga de audio desde YouTube y otros sitios
-import threading  # Para ejecutar tareas en segundo plano
-import time  # Funciones relacionadas con el tiempo
-import json  # Lectura y escritura de datos en formato JSON
-import os  # Operaciones con el sistema de archivos
+
+import flet as ft 
+
+from ffpyplayer.player import MediaPlayer 
+import yt_dlp 
+
+import threading  
 import subprocess
 
-estado_pausado = False  # Variable global que indica si la canción está pausada
+import time  
+
+import json  
+import os 
+
+estado_pausado = False  
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# Carpeta donde se guardarán las canciones
 MUSIC_FOLDER = os.path.join(BASE_DIR, "music")
-
-# Archivo JSON donde se guarda la playlist
 PLAYLIST_FILE = os.path.join(BASE_DIR, "playlist.json")
 
-# Nodo de la lista doblemente enlazada circular (una canción)
 class NodoCancion:
     def __init__(self, titulo, url, miniatura, file_path=None):
-        self.titulo = titulo  # Título de la canción
-        self.url = url  # URL de la canción (ej. YouTube)
-        self.miniatura = miniatura  # URL de la miniatura
-        self.file_path = file_path  # Ruta local del archivo descargado
-        self.anterior = None  # Nodo anterior en la lista
-        self.siguiente = None  # Nodo siguiente en la lista
+        self.titulo = titulo  
+        self.url = url 
+        self.miniatura = miniatura 
+        self.file_path = file_path  
+
+        self.anterior = None 
+        self.siguiente = None  
 
     def to_dict(self):
         return {
@@ -32,7 +34,7 @@ class NodoCancion:
             "url": self.url,
             "miniatura": self.miniatura,
             "file_path": self.file_path
-        }  # Convierte el nodo en un diccionario (para guardar en JSON)
+        }  # Convierte el nodo en un diccionario 
 
     @staticmethod
     def from_dict(data):
@@ -41,39 +43,41 @@ class NodoCancion:
             data["url"],
             data["miniatura"],
             data.get("file_path")
-        )  # Crea un nodo desde un diccionario (cargado desde JSON)
+        )  # Crea un nodo desde un diccionario 
 
-# Lista doblemente enlazada circular 
 class ListaReproduccion:
     def __init__(self):
-        self.actual = None  # Nodo actual en reproducción
-        self.longitud = 0  # Número de canciones en la lista
+        self.PTR = None 
+        self.longitud = 0  
 
     def agregar(self, cancion):
-        if not self.actual:
-            self.actual = cancion  # Primera canción agregada
-            cancion.siguiente = cancion.anterior = cancion  # Enlaza consigo misma
+        if not self.PTR:
+            self.PTR = cancion  
+            cancion.siguiente = cancion.anterior = cancion 
         else:
-            ultima = self.actual.anterior  # Última canción de la lista
-            ultima.siguiente = cancion  # Enlace hacia nueva canción
-            cancion.anterior = ultima  # Enlace hacia atrás
-            cancion.siguiente = self.actual  # Nueva canción apunta al inicio
-            self.actual.anterior = cancion  # Enlace desde inicio hacia nueva
-        self.longitud += 1  # Aumenta la longitud de la lista
+            FINAL = self.PTR.anterior 
+            FINAL.siguiente = cancion  
+            cancion.anterior = FINAL 
+            cancion.siguiente = self.PTR  
+            self.PTR.anterior = cancion  
+
+        self.longitud += 1  
 
     def eliminar(self, cancion):
         if self.longitud == 0:
-            return  # Lista vacía, no hay nada que eliminar
-        if self.longitud == 1 and self.actual == cancion:
-            self.actual = None  # Elimina la única canción
+            return  
+        
+        if self.longitud == 1 and self.PTR == cancion:
+            self.PTR = None  
         else:
-            if self.actual == cancion:
-                self.actual = cancion.siguiente  # Mueve el puntero actual
-            cancion.anterior.siguiente = cancion.siguiente  # Ajusta enlaces
-            cancion.siguiente.anterior = cancion.anterior
-        self.longitud -= 1  # Disminuye la longitud
+            if self.PTR == cancion:
+                self.PTR = cancion.siguiente
 
-        # Elimina el archivo si existe
+            cancion.anterior.siguiente = cancion.siguiente  
+            cancion.siguiente.anterior = cancion.anterior
+
+        self.longitud -= 1 
+
         if cancion.file_path and os.path.exists(cancion.file_path):
             try:
                 os.remove(cancion.file_path)
@@ -81,68 +85,63 @@ class ListaReproduccion:
                 print(f"Error al eliminar archivo: {e}")
 
     def siguiente(self):
-        if self.actual:
-            self.actual = self.actual.siguiente  # Avanza al siguiente nodo
+        if self.PTR:
+            self.PTR = self.PTR.siguiente  
 
     def anterior(self):
-        if self.actual:
-            self.actual = self.actual.anterior  # Retrocede al nodo anterior
+        if self.PTR:
+            self.PTR = self.PTR.anterior  
 
     def recorrer(self):
         canciones = []
-        if self.actual:
-            nodo = self.actual
-            for _ in range(self.longitud):  # Recorre todos los nodos
+        if self.PTR:
+            nodo = self.PTR
+            for _ in range(self.longitud):  
                 canciones.append(nodo)
                 nodo = nodo.siguiente
-        return canciones  # Devuelve la lista de canciones
+        return canciones  
 
     def vaciar(self):
-        for cancion in self.recorrer():  # Elimina archivos locales
+        for cancion in self.recorrer():  
             if cancion.file_path and os.path.exists(cancion.file_path):
                 try:
                     os.remove(cancion.file_path)
                 except Exception as e:
                     print(f"Error al eliminar archivo: {e}")
-        self.actual = None  # Reinicia la lista
+        self.PTR = None  
         self.longitud = 0
 
     def guardar(self, archivo):
         with open(archivo, "w", encoding="utf-8") as f:
             json.dump([c.to_dict() for c in self.recorrer()], f, ensure_ascii=False, indent=2)
-            # Guarda la playlist como lista de diccionarios en JSON
 
     def cargar(self, archivo):
         if not os.path.exists(archivo):
-            return  # No hay archivo para cargar
-        self.vaciar()  # Limpia la lista antes de cargar
+            return  
+        self.vaciar()
         with open(archivo, "r", encoding="utf-8") as f:
             datos = json.load(f)
             for d in datos:
                 if "file_path" in d and d["file_path"] and not os.path.exists(d["file_path"]):
-                    d["file_path"] = None  # Ignora archivos que ya no existen
-                self.agregar(NodoCancion.from_dict(d))  # Agrega a la lista
+                    d["file_path"] = None
+                self.agregar(NodoCancion.from_dict(d)) 
 
-# Variables globales
-lista_reproduccion = ListaReproduccion()  # Lista de reproducción actual
-player = None  # Reproductor multimedia
-reproduciendo = False  # Estado de reproducción
+lista_reproduccion = ListaReproduccion()  
+player = None 
+reproduciendo = False  
 
-# Crea la carpeta de música si no existe
 if not os.path.exists(MUSIC_FOLDER):
     os.makedirs(MUSIC_FOLDER)
 
-# Descarga el audio en formato MP3 desde una URL y devuelve la ruta local
 def descargar_mp3(url, titulo):
-    safe_title = "".join(c for c in titulo if c.isalnum() or c in " -_").rstrip()  # Limpia el título
-    output_path = os.path.join(MUSIC_FOLDER, f"{safe_title}.mp3")  # Ruta final del archivo
+    safe_title = "".join(c for c in titulo if c.isalnum() or c in " -_").rstrip() 
+    output_path = os.path.join(MUSIC_FOLDER, f"{safe_title}.mp3")  
 
     if os.path.exists(output_path):
-        return output_path  # Retorna si ya fue descargado
+        return output_path  
 
-    temp_path = os.path.join(MUSIC_FOLDER, f"temp_{safe_title}.%(ext)s")  # Ruta temporal
+    temp_path = os.path.join(MUSIC_FOLDER, f"temp_{safe_title}.%(ext)s")  
 
-    # Opciones de configuración para yt_dlp
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': temp_path,
@@ -165,13 +164,12 @@ def descargar_mp3(url, titulo):
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)  # Extrae metadata sin descargar
+            info = ydl.extract_info(url, download=False)  
             if not info:
                 raise Exception("No se pudo obtener información del video")
 
-            ydl.download([url])  # Descarga el audio
+            ydl.download([url])  
 
-            # Renombra el archivo temporal a .mp3 final
             for ext in ['.webm', '.m4a', '.mp3', '.part']:
                 temp_file = temp_path.replace('%(ext)s', ext[1:])
                 if os.path.exists(temp_file):
@@ -191,7 +189,7 @@ def descargar_mp3(url, titulo):
             return output_path
 
     except Exception as e:
-        # Limpia archivos temporales si hay error
+        
         for ext in ['.webm', '.m4a', '.mp3', '.part']:
             temp_file = temp_path.replace('%(ext)s', ext[1:])
             if os.path.exists(temp_file):
@@ -202,7 +200,6 @@ def descargar_mp3(url, titulo):
         print(f"Error al descargar MP3: {e}")
         return None
 
-# Obtiene info de la canción desde un texto (URL o búsqueda) y devuelve un NodoCancion
 def obtener_info_cancion(texto):
     ydl_opts = {
         'format': 'bestaudio/best',
@@ -217,27 +214,27 @@ def obtener_info_cancion(texto):
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            for _ in range(3):  # Intenta 3 veces
+            for _ in range(3): 
                 try:
-                    info = ydl.extract_info(texto, download=False)  # Extrae metadata
+                    info = ydl.extract_info(texto, download=False)  
                     if not info:
                         continue
 
                     if 'entries' in info:
-                        info = info['entries'][0]  # Toma el primer resultado
+                        info = info['entries'][0]  
 
-                    titulo = info.get('title', 'Sin título')  # Título del video
-                    miniatura = info.get('thumbnail', 'https://via.placeholder.com/200')  # Imagen
-                    url = info.get('url') or info.get('webpage_url')  # URL de reproducción o descarga
+                    titulo = info.get('title', 'Sin título')  
+                    miniatura = info.get('thumbnail', 'https://via.placeholder.com/200') 
+                    url = info.get('url') or info.get('webpage_url')  
 
                     if not url:
                         continue
 
-                    file_path = descargar_mp3(url, titulo)  # Descarga el MP3
+                    file_path = descargar_mp3(url, titulo)  
                     if not file_path:
                         continue
 
-                    return NodoCancion(titulo, url, miniatura, file_path)  # Retorna el nodo
+                    return NodoCancion(titulo, url, miniatura, file_path)  
 
                 except (yt_dlp.utils.DownloadError, yt_dlp.utils.ExtractorError) as e:
                     print(f"Intento fallido: {e}")
@@ -249,107 +246,85 @@ def obtener_info_cancion(texto):
     except Exception as e:
         raise Exception(f"Error al obtener información: {str(e)}")
 
-def main(page: ft.Page):  # Función principal de la app, recibe la página de Flet
-    global lista_reproduccion, player, reproduciendo   # Se usan variables globales para controlar el estado
 
-    # Configuración general de la página
-    page.title = "🎵 Reproductor Musical MP3"  # Título de la ventana
-    page.theme_mode = ft.ThemeMode.DARK  # Tema oscuro
-    page.horizontal_alignment = ft.CrossAxisAlignment.CENTER  # Alineación horizontal centrada
-    page.scroll = ft.ScrollMode.AUTO  # Scroll automático si el contenido se desborda
-    page.padding = 20  # Espaciado interno de la página
-    page.window_min_width = 600  # Ancho mínimo de la ventana
-    page.window_min_height = 700  # Alto mínimo de la ventana
 
-    # Campo de texto para buscar canción o pegar una URL
+
+def main(page: ft.Page):  
+    global lista_reproduccion, player, reproduciendo  
+
+    page.title = "🎵 Reproductor Musical"  
+    page.theme_mode = ft.ThemeMode.DARK  
+    page.horizontal_alignment = ft.CrossAxisAlignment.CENTER  
+    page.scroll = ft.ScrollMode.AUTO  
+    page.padding = 20  
+    page.window_min_width = 600  
+    page.window_min_height = 700  
+
     entrada_busqueda = ft.TextField(
-        label="Buscar canción o pegar URL de YouTube",  # Etiqueta del campo
-        width=500,  # Ancho del campo
-        height=50,  # Alto del campo
-        border_radius=10,  # Bordes redondeados
-        filled=True,  # Fondo lleno
-        prefix_icon=ft.icons.SEARCH,  # Icono de búsqueda al inicio
-        autofocus=True  # Se enfoca automáticamente al iniciar
+        label="Buscar canción o pegar URL de YouTube",  
+        width=500,  
+        height=50,  
+        border_radius=10,  
+        filled=True,  
+        prefix_icon=ft.icons.SEARCH,  
+        autofocus=True  
     )
 
-    # Botón para agregar canción a la lista de reproducción
     boton_agregar = ft.ElevatedButton(
-        text="Agregar a la lista",  # Texto del botón
-        icon=ft.icons.ADD,  # Icono de suma
-        on_click=lambda _: agregar_cancion(entrada_busqueda.value),  # Acción al hacer clic
-        height=50,  # Alto del botón
+        text="Agregar a la lista", 
+        icon=ft.icons.ADD,
+        on_click=lambda _: agregar_cancion(entrada_busqueda.value),  
+        height=50,  
         style=ft.ButtonStyle(
-            shape=ft.RoundedRectangleBorder(radius=10),  # Borde redondeado
-            padding=20  # Espaciado interno del botón
+            shape=ft.RoundedRectangleBorder(radius=10),  
+            padding=20  
         )
     )
 
-    # Texto que muestra el título de la canción actual
     texto_titulo = ft.Text(
-        "No hay canciones en la lista",  # Texto por defecto
-        size=24,  # Tamaño del texto
-        weight=ft.FontWeight.BOLD,  # Texto en negrita
-        text_align=ft.TextAlign.CENTER  # Alineación centrada
+        "No hay canciones en la lista", 
+        size=24,  
+        weight=ft.FontWeight.BOLD,  
+        text_align=ft.TextAlign.CENTER  
     )
 
-    # Imagen de la miniatura de la canción actual
     imagen_cancion = ft.Image(
-        src="https://via.placeholder.com/300",  # Imagen por defecto
-        width=300,  # Ancho de la imagen
-        height=300,  # Alto de la imagen
-        fit=ft.ImageFit.CONTAIN,  # Ajuste de la imagen sin recortar
-        border_radius=ft.border_radius.all(10)  # Bordes redondeados
+        src="https://via.placeholder.com/300",  
+        width=300, 
+        height=300,  
+        fit=ft.ImageFit.CONTAIN,  
+        border_radius=ft.border_radius.all(10)  
     )
 
-    def pausar(_=None):  # Función para pausar la reproducción
-        global player  # Usamos la variable global del reproductor
-        if player:  # Si hay una canción cargada
-            player.toggle_pause()  # Alterna entre pausar y reanudar
+    def pausar(_=None): 
+        global player  
+        if player:  
+            player.toggle_pause()  
 
-    def detener(_=None):  # Función para detener la reproducción
-        global player, reproduciendo  # Usamos variables globales
-        if player:  # Si el reproductor está activo
+    def detener(_=None):  
+        global player, reproduciendo  
+        if player:  
             try:
-                player.close_player()  # Cerramos el reproductor
+                player.close_player()  
             except:
-                pass  # Ignoramos errores al cerrar
-            player = None  # Limpiamos la variable del reproductor
-        reproduciendo = False  # Indicamos que no se está reproduciendo
+                pass  
+            player = None  
+        reproduciendo = False  
 
-    def anterior(_=None):  # Función para ir a la canción anterior
-        detener()  # Detenemos la canción actual
-        lista_reproduccion.anterior()  # Movemos al nodo anterior
-        tocar_actual()  # Reproducimos la nueva canción actual
-        actualizar_lista_ui()  # Actualizamos la interfaz de la lista
+    def anterior(_=None):  
+        detener()  
+        lista_reproduccion.anterior()  
+        tocar_actual()  
+        actualizar_lista_ui()  
 
-    def siguiente(_=None):  # Función para ir a la canción siguiente
-        detener()  # Detenemos la canción actual
-        lista_reproduccion.siguiente()  # Movemos al nodo siguiente
-        tocar_actual()  # Reproducimos la nueva canción actual
-        actualizar_lista_ui()  # Actualizamos la interfaz de la lista
+    def siguiente(_=None):  
+        detener()  
+        lista_reproduccion.siguiente()  
+        tocar_actual()  
+        actualizar_lista_ui()  
 
-    def tocar_actual():  # Función para reproducir la canción actual
-        global reproduciendo  # Variable global para controlar el estado de reproducción
-        if not lista_reproduccion.actual:  # Si no hay canción actual
-            return  # Salimos de la función
+    
 
-        detener()  # Detenemos cualquier reproducción previa
-        cancion = lista_reproduccion.actual  # Obtenemos la canción actual
-
-        texto_titulo.value = cancion.titulo  # Mostramos el título de la canción
-        imagen_cancion.src = cancion.miniatura or "https://via.placeholder.com/300"  # Mostramos miniatura o imagen por defecto
-        page.update()  # Actualizamos la interfaz
-
-        if cancion.file_path and os.path.exists(cancion.file_path):  # Si el archivo ya está descargado
-            reproduciendo = True  # Indicamos que estamos reproduciendo
-            threading.Thread(target=reproducir_mp3, args=(cancion.file_path,), daemon=True).start()  # Reproducimos en un hilo separado
-
-     # 2. Luego creamos los controles que usan estas funciones
-
-    # Variable de estado para saber si está pausado
-    estado_pausado = False
-
-    # Botón para ir a la canción anterior
     boton_anterior = ft.IconButton(
         icon=ft.icons.SKIP_PREVIOUS,
         icon_size=40,
@@ -357,7 +332,6 @@ def main(page: ft.Page):  # Función principal de la app, recibe la página de F
         on_click=anterior
     )
 
-    # Botón para reproducir toda la lista, ubicado al extremo
     boton_play = ft.IconButton(
         icon=ft.icons.PLAY_ARROW,
         icon_size=50,
@@ -366,7 +340,6 @@ def main(page: ft.Page):  # Función principal de la app, recibe la página de F
         style=ft.ButtonStyle(bgcolor=ft.colors.BLUE_700)
     )
 
-    # Botón que alterna entre pausa y play
     boton_pausa = ft.IconButton(
         icon=ft.icons.PAUSE,
         icon_size=50,
@@ -375,7 +348,6 @@ def main(page: ft.Page):  # Función principal de la app, recibe la página de F
         style=ft.ButtonStyle(bgcolor=ft.colors.AMBER_700)
     )
 
-    # Botón para detener la reproducción
     boton_stop = ft.IconButton(
         icon=ft.icons.STOP,
         icon_size=50,
@@ -384,7 +356,6 @@ def main(page: ft.Page):  # Función principal de la app, recibe la página de F
         style=ft.ButtonStyle(bgcolor=ft.colors.BLUE_700)
     )
 
-    # Botón para ir a la siguiente canción
     boton_siguiente = ft.IconButton(
         icon=ft.icons.SKIP_NEXT,
         icon_size=40,
@@ -392,37 +363,32 @@ def main(page: ft.Page):  # Función principal de la app, recibe la página de F
         on_click=siguiente
     )
 
-    # Función que alterna entre pausa y reproducción visualmente
     def alternar_pausa():
         global estado_pausado, player
         if estado_pausado:
             if player:
-                player.set_pause(False)  # Reanuda
+                player.set_pause(False)  
             boton_pausa.icon = ft.icons.PAUSE
             boton_pausa.tooltip = "Pausar"
             estado_pausado = False
         else:
-            pausar()  # Pausa usando toggle
+            pausar() 
             boton_pausa.icon = ft.icons.PLAY_ARROW
             boton_pausa.tooltip = "Reanudar"
             estado_pausado = True
         page.update()
 
-    # Contenedor de controles reorganizado
-
     controles_reproduccion = ft.Container(
         ft.Stack(
             [
-                # Botones a la izquierda (play y stop)
                 ft.Row(
                     [boton_play, boton_stop],
                     alignment=ft.MainAxisAlignment.START,
                 ),
-                # Botones centrados (anterior, pausa, siguiente)
                 ft.Row(
                     [boton_anterior, boton_pausa, boton_siguiente],
                     alignment=ft.MainAxisAlignment.CENTER,
-                    width=float("inf")  # Ocupa todo el ancho
+                    width=float("inf")  
                 )
             ]
         ),
@@ -430,126 +396,114 @@ def main(page: ft.Page):  # Función principal de la app, recibe la página de F
         width=float("inf")
     )
 
-
-    # Lista de reproducción canciones
-    lista_canciones = ft.Column(  # Contenedor en columna para las canciones
-        spacing=5,  # Espacio entre elementos
-        scroll=ft.ScrollMode.AUTO,  # Activar scroll automático
-        expand=True  # Que ocupe todo el espacio disponible
+    lista_canciones = ft.Column(  
+        spacing=5,  
+        scroll=ft.ScrollMode.AUTO,  
+        expand=True  
     )
 
-    # Función para mover una canción hacia arriba en la lista
     def mover_arriba(cancion):
-        if lista_reproduccion.longitud <= 1:  # No mover si solo hay una canción
+        if lista_reproduccion.longitud <= 1:  
             return
 
-        canciones = lista_reproduccion.recorrer()  # Obtener la lista en orden
-        current_index = canciones.index(cancion)  # Buscar el índice de la canción
+        canciones = lista_reproduccion.recorrer()  
+        current_index = canciones.index(cancion)  
 
-        if current_index == 0:  # Ya está arriba del todo
+        if current_index == 0:  
             return
 
-        # Obtener la canción anterior
         cancion_anterior = canciones[current_index-1]
-        es_primera = (current_index == 1)  # Si está justo después de la actual
-        es_ultima = (current_index == len(canciones)-1)  # Si es la última
+        es_primera = (current_index == 1)  
 
-        # Reconectar los enlaces para subirla en la lista
-        cancion_anterior.anterior.siguiente = cancion  # El anterior del anterior apunta a esta
-        cancion.anterior = cancion_anterior.anterior  # Esta apunta hacia arriba
+        cancion_anterior.anterior.siguiente = cancion 
+        cancion.anterior = cancion_anterior.anterior  
 
-        cancion_anterior.siguiente = cancion.siguiente  # El anterior conecta con el siguiente
-        cancion.siguiente.anterior = cancion_anterior  # El siguiente conecta con el anterior
+        cancion_anterior.siguiente = cancion.siguiente  
+        cancion.siguiente.anterior = cancion_anterior  
 
-        cancion.siguiente = cancion_anterior  # Esta apunta al anterior (swap)
-        cancion_anterior.anterior = cancion  # Y el anterior apunta a esta
+        cancion.siguiente = cancion_anterior 
+        cancion_anterior.anterior = cancion 
 
-        if es_primera:  # Si era la segunda en la lista
-            lista_reproduccion.actual = cancion  # Ahora es la primera
+        if es_primera:  
+            lista_reproduccion.PTR = cancion  
 
-        lista_reproduccion.guardar(PLAYLIST_FILE)  # Guardar cambios en archivo
-        actualizar_lista_ui()  # Refrescar la interfaz
+        lista_reproduccion.guardar(PLAYLIST_FILE) 
+        actualizar_lista_ui()
 
-    # Función para mover una canción hacia abajo en la lista
     def mover_abajo(cancion):
-        if lista_reproduccion.longitud <= 1:  # Si solo hay una canción, no se puede mover
+        if lista_reproduccion.longitud <= 1:  
             return
 
-        canciones = lista_reproduccion.recorrer()  # Obtener la lista actual
-        current_index = canciones.index(cancion)  # Obtener posición de la canción
+        canciones = lista_reproduccion.recorrer()  
+        current_index = canciones.index(cancion) 
 
-        if current_index == len(canciones)-1:  # Ya está abajo del todo
+        if current_index == len(canciones)-1:  
             return
 
-        cancion_siguiente = canciones[current_index+1]  # Obtener la siguiente canción
-        es_primera = (current_index == 0)  # Si es la primera en la lista
-        es_penultima = (current_index == len(canciones)-2)  # Si es la penúltima
+        cancion_siguiente = canciones[current_index+1]  
+        es_primera = (current_index == 0)  
 
-        # Reconectar nodos para bajarla en la lista
-        cancion.anterior.siguiente = cancion_siguiente  # El anterior apunta al siguiente
-        cancion_siguiente.anterior = cancion.anterior  # El siguiente apunta al anterior
+        cancion.anterior.siguiente = cancion_siguiente  
+        cancion_siguiente.anterior = cancion.anterior  
 
-        cancion.siguiente = cancion_siguiente.siguiente  # Esta apunta al después del siguiente
-        cancion_siguiente.siguiente.anterior = cancion  # El después del siguiente apunta a esta
+        cancion.siguiente = cancion_siguiente.siguiente  
+        cancion_siguiente.siguiente.anterior = cancion  
 
-        cancion_siguiente.siguiente = cancion  # El siguiente ahora apunta a esta
-        cancion.anterior = cancion_siguiente  # Esta apunta al siguiente
+        cancion_siguiente.siguiente = cancion  
+        cancion.anterior = cancion_siguiente  
 
-        if es_primera and current_index == 0:  # Si era la primera
-            lista_reproduccion.actual = cancion_siguiente  # La nueva primera es la siguiente
+        if es_primera and current_index == 0:  
+            lista_reproduccion.PTR = cancion_siguiente  
 
-        lista_reproduccion.guardar(PLAYLIST_FILE)  # Guardar la lista
-        actualizar_lista_ui()  # Refrescar la interfaz
+        lista_reproduccion.guardar(PLAYLIST_FILE)  
+        actualizar_lista_ui()  
 
-    # Crear el contenedor visual para una canción individual
     def crear_item_lista(cancion):
-        return ft.Container(  # Contenedor visual de la canción
-            content=ft.Row(  # Organizado en fila
+        return ft.Container(  
+            content=ft.Row(  
                 [
-                    ft.IconButton(  # Botón para subir
+                    ft.IconButton(  
                         icon=ft.icons.ARROW_UPWARD,
-                        on_click=lambda _, c=cancion: mover_arriba(c),  # Acción
-                        tooltip="Mover arriba",  # Texto de ayuda
-                        icon_size=20  # Tamaño del ícono
+                        on_click=lambda _, c=cancion: mover_arriba(c),  
+                        tooltip="Mover arriba",  
+                        icon_size=20  
                     ),
-                    ft.IconButton(  # Botón para bajar
+                    ft.IconButton(  
                         icon=ft.icons.ARROW_DOWNWARD,
-                        on_click=lambda _, c=cancion: mover_abajo(c),  # Acción
+                        on_click=lambda _, c=cancion: mover_abajo(c), 
                         tooltip="Mover abajo",
                         icon_size=20
                     ),
-                    ft.Text(cancion.titulo, expand=True, size=16),  # Título de la canción
-                    ft.IconButton(  # Botón de eliminar
+                    ft.Text(cancion.titulo, expand=True, size=16),  
+
+                    ft.IconButton(  
                         icon=ft.icons.DELETE,
-                        tooltip="Eliminar",  # Texto de ayuda
-                        on_click=lambda _, c=cancion: eliminar_cancion(c),  # Acción al clic
-                        icon_color=ft.colors.RED_400  # Color del ícono
+                        tooltip="Eliminar", 
+                        on_click=lambda _, c=cancion: eliminar_cancion(c),  
+                        icon_color=ft.colors.RED_400  
                     )
                 ],
-                alignment=ft.MainAxisAlignment.START,  # Alinear al inicio
-                vertical_alignment=ft.CrossAxisAlignment.CENTER  # Centrado vertical
+                alignment=ft.MainAxisAlignment.START,  
+                vertical_alignment=ft.CrossAxisAlignment.CENTER  
             ),
-            padding=10,  # Relleno interior
-            border_radius=5,  # Bordes redondeados
-            bgcolor=ft.colors.GREY_900 if lista_reproduccion.actual == cancion else ft.colors.GREY_800,  # Color de fondo
-            border=ft.border.all(1, ft.colors.GREY_700)  # Borde con color
+            padding=10,  
+            border_radius=5,  
+            bgcolor=ft.colors.GREY_900 if lista_reproduccion.PTR == cancion else ft.colors.GREY_800,  
+            border=ft.border.all(1, ft.colors.GREY_700)  
         )
 
-     # Función para actualizar visualmente la lista de reproducción
     def actualizar_lista_ui():
-        lista_canciones.controls.clear()  # Limpiamos todos los controles actuales de la lista
-        for cancion in lista_reproduccion.recorrer():  # Recorremos todas las canciones de la lista
-            lista_canciones.controls.append(crear_item_lista(cancion))  # Creamos y agregamos el ítem visual de cada canción
-        page.update()  # Actualizamos la página para reflejar los cambios
+        lista_canciones.controls.clear()  
+        for cancion in lista_reproduccion.recorrer():  
+            lista_canciones.controls.append(crear_item_lista(cancion))  
+        page.update() 
 
-    # Muestra un mensaje de error en un SnackBar
     def mostrar_error(mensaje):
-        page.snack_bar = ft.SnackBar(ft.Text(mensaje))  # Creamos el SnackBar con el mensaje
-        page.snack_bar.open = True  # Lo abrimos
-        page.update()  # Actualizamos la página
+        page.snack_bar = ft.SnackBar(ft.Text(mensaje))  
+        page.snack_bar.open = True  
+        page.update()  
 
     def obtener_duracion(file_path):
-        """Obtiene la duración exacta del MP3 usando ffprobe"""
         try:
             cmd = [
                 'ffprobe', '-v', 'error', 
@@ -560,62 +514,43 @@ def main(page: ft.Page):  # Función principal de la app, recibe la página de F
             result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             return float(result.stdout.strip())
         except:
-            return None  # Si falla, manejaremos este caso
+            return None  
 
     def reproducir_mp3(file_path):
         
         global player, reproduciendo
         
-        # 1. Obtener duración real del archivo
         duracion = obtener_duracion(file_path)
         
         if duracion is None:
             print("¡Error! No se pudo obtener la duración. Usando valor por defecto (3 mins)")
-            duracion = 180  # 3 minutos por defecto
+            duracion = 300  
         
         print(f"Duración detectada: {duracion:.2f} segundos")
         
-        # 2. Configurar reproductor (ignorando frames)
         player = MediaPlayer(file_path)
         inicio = time.time()
         
         try:
-            # 3. Bucle basado únicamente en el tiempo
-            reproduciendo = True     # Controla si se sigue reproduciendo
-
-            # Variables para el contador de tiempo real de reproducción
+            reproduciendo = True     
             tiempo_transcurrido = 0.0
+
             ultimo_reloj = time.time()
 
-            # Variable auxiliar para imprimir cada 10 segundos (evitar duplicados)
-            ultimo_intervalo_imprimido = -1  
-
             while reproduciendo:
-                print(boton_pausa.icon == ft.icons.PLAY_ARROW)
-                # Marca el tiempo actual en cada iteración
                 tiempo_actual = time.time()
                 
                 if not (boton_pausa.icon == ft.icons.PLAY_ARROW):
-                    # Calcula el tiempo transcurrido solo durante la reproducción
                     delta = tiempo_actual - ultimo_reloj
                     tiempo_transcurrido += delta
                     
-                    # Verificar si se ha alcanzado 1 segundo antes del final
                     if tiempo_transcurrido >= duracion - 1:
                         print(f"Cambiando 1s antes del final (Tiempo: {tiempo_transcurrido:.2f}s)")
-                        siguiente()  # Llamada a la función que cambia la pista
+                        siguiente()  
                         break
-                    
-                    # Imprimir el progreso cada 10 segundos, evitando repetición
-                    intervalo_actual = int(tiempo_transcurrido // 10)
-                    if intervalo_actual > ultimo_intervalo_imprimido:
-                        print(f"Reproduciendo... {tiempo_transcurrido:.1f}s / {duracion:.1f}s")
-                        ultimo_intervalo_imprimido = intervalo_actual
                 
-                # Actualizamos el reloj de la última iteración
                 ultimo_reloj = tiempo_actual
                 
-                # Retardo para evitar consumo excesivo de CPU
                 time.sleep(0.1)
         
         except Exception as e:
@@ -626,167 +561,142 @@ def main(page: ft.Page):  # Función principal de la app, recibe la página de F
                 player.close_player()
             print(f"Reproducción finalizada. Tiempo total: {time.time() - inicio:.2f}s")
 
-    # Función para reproducir la canción actual (verificada)
     def tocar_actual():
-        global reproduciendo  # Usamos la variable global
+        
+        global reproduciendo  
 
-        if not lista_reproduccion.actual:
-            return  # Si no hay canción actual, salimos
+        if not lista_reproduccion.PTR:
+            return  
+        detener() 
 
-        detener()  # Detenemos la canción actual
+        cancion = lista_reproduccion.PTR  
 
-        cancion = lista_reproduccion.actual  # Obtenemos la canción actual
+        texto_titulo.value = cancion.titulo  
+        imagen_cancion.src = cancion.miniatura or "https://via.placeholder.com/300" 
+        page.update()  
 
-        texto_titulo.value = cancion.titulo  # Mostramos el título
-        imagen_cancion.src = cancion.miniatura or "https://via.placeholder.com/300"  # Mostramos la miniatura
-        page.update()  # Actualizamos la UI
-
-        # Si ya está descargada localmente
         if cancion.file_path and os.path.exists(cancion.file_path):
-            reproduciendo = True  # Marcamos que estamos reproduciendo
-            threading.Thread(target=reproducir_mp3, args=(cancion.file_path,), daemon=True).start()  # Reproducimos en otro hilo
+            reproduciendo = True  
+            threading.Thread(target=reproducir_mp3, args=(cancion.file_path,), daemon=True).start()  
         else:
             try:
-                file_path = descargar_mp3(cancion.url, cancion.titulo)  # Descargamos la canción desde YouTube
-                if file_path:  # Si la descarga fue exitosa
-                    cancion.file_path = file_path  # Guardamos la ruta en el objeto canción
-                    lista_reproduccion.guardar(PLAYLIST_FILE)  # Guardamos la lista actualizada
-                    reproduciendo = True  # Marcamos que se está reproduciendo
-                    threading.Thread(target=reproducir_mp3, args=(file_path,), daemon=True).start()  # Reproducimos
+                file_path = descargar_mp3(cancion.url, cancion.titulo)  
+                if file_path:  
+                    cancion.file_path = file_path  
+                    lista_reproduccion.guardar(PLAYLIST_FILE) 
+                    reproduciendo = True  
+                    threading.Thread(target=reproducir_mp3, args=(file_path,), daemon=True).start()  
                 else:
-                    mostrar_error("No se pudo descargar el archivo MP3")  # Mostramos error si no se pudo descargar
+                    mostrar_error("No se pudo descargar el archivo MP3")  
             except Exception as e:
-                mostrar_error(f"Error al descargar MP3: {e}")  # Mostramos cualquier otro error
+                mostrar_error(f"Error al descargar MP3: {e}")  
 
-    # Función para pausar la reproducción
-    def pausar(_=None):
-        
-        global player  # Usamos el reproductor global
-        if player:
-            player.toggle_pause()  # Alternamos entre pausar y reanudar
-
-    # Función para detener la reproducción completamente
-    def detener(_=None):
-        global player, reproduciendo  # Usamos variables globales
-        if player:
-            try:
-                player.close_player()  # Cerramos el reproductor
-            except:
-                pass  # Ignoramos errores al cerrar
-            player = None  # Eliminamos la instancia del reproductor
-        reproduciendo = False  # Indicamos que no se está reproduciendo
-
-    # Reproduce la siguiente canción
-    def siguiente(_=None):
-        detener()  # Detenemos la actual
-        lista_reproduccion.siguiente()  # Avanzamos al siguiente nodo
-        tocar_actual()  # Reproducimos la nueva canción
-        actualizar_lista_ui()  # Actualizamos la UI
-
-    # Reproduce la canción anterior
-    def anterior(_=None):
-        detener()  # Detenemos la actual
-        lista_reproduccion.anterior()  # Retrocedemos un nodo
-        tocar_actual()  # Reproducimos la nueva canción
-        actualizar_lista_ui()  # Actualizamos la UI
-
-    # Agrega una canción desde un texto o URL
     def agregar_cancion(texto):
-        texto = texto.strip()  # Eliminamos espacios en blanco
+        texto = texto.strip() 
         if not texto:
-            return  # Si está vacío, salimos
+            return  
 
-        page.splash = ft.ProgressBar()  # Mostramos barra de carga
-        entrada_busqueda.disabled = True  # Desactivamos la entrada
-        boton_agregar.disabled = True  # Desactivamos el botón
-        page.update()  # Actualizamos la UI
+        page.splash = ft.ProgressBar()  
+        entrada_busqueda.disabled = True  
+        boton_agregar.disabled = True  
+        page.update()  
 
         try:
-            cancion = obtener_info_cancion(texto)  # Obtenemos info de la canción desde YouTube o búsqueda
-            lista_reproduccion.agregar(cancion)  # La agregamos a la lista
-            lista_reproduccion.guardar(PLAYLIST_FILE)  # Guardamos la lista actualizada
-            actualizar_lista_ui()  # Actualizamos la UI
+            cancion = obtener_info_cancion(texto)  
+            lista_reproduccion.agregar(cancion)  
+            lista_reproduccion.guardar(PLAYLIST_FILE)  
+            actualizar_lista_ui() 
 
             if lista_reproduccion.longitud == 1:
-                tocar_actual()  # Si es la primera canción, la reproducimos
+                tocar_actual()  
 
         except Exception as e:
-            mostrar_error(f"Error al agregar canción: {str(e)}")  # Mostramos el error
+            mostrar_error(f"Error al agregar canción: {str(e)}") 
 
         finally:
-            page.splash = None  # Quitamos la barra de carga
-            entrada_busqueda.disabled = False  # Activamos la entrada
-            boton_agregar.disabled = False  # Activamos el botón
-            entrada_busqueda.value = ""  # Borramos el texto ingresado
-            page.update()  # Actualizamos la UI
+            page.splash = None  
+            entrada_busqueda.disabled = False  
+            boton_agregar.disabled = False  
+            entrada_busqueda.value = ""  
+            page.update()  
 
-    # Elimina una canción de la lista
     def eliminar_cancion(cancion):
-        global player, reproduciendo  # Usamos variables globales
+        global player, reproduciendo  
 
-        if lista_reproduccion.actual == cancion:  # Si la canción eliminada es la actual
+        if lista_reproduccion.PTR == cancion:  
             if lista_reproduccion.longitud == 1:
-                detener()  # Si era la única canción, detenemos todo
-                lista_reproduccion.actual = None  # Borramos la referencia
-                lista_reproduccion.longitud = 0  # Reiniciamos la longitud
+                detener()  
+                lista_reproduccion.PTR = None  
+                lista_reproduccion.longitud = 0 
             else:
-                siguiente()  # Si hay más, pasamos a la siguiente
+                siguiente() 
 
-        lista_reproduccion.eliminar(cancion)  # Eliminamos la canción de la lista
-        lista_reproduccion.guardar(PLAYLIST_FILE)  # Guardamos la lista modificada
-        actualizar_lista_ui()  # Actualizamos la UI
+        lista_reproduccion.eliminar(cancion)  
+        lista_reproduccion.guardar(PLAYLIST_FILE)  
+        actualizar_lista_ui()  
 
         if lista_reproduccion.longitud == 0:
-            texto_titulo.value = "No hay canciones en la lista"  # Mostramos mensaje vacío
-            imagen_cancion.src = "https://via.placeholder.com/300"  # Imagen por defecto
-            page.update()  # Actualizamos la UI
+            texto_titulo.value = "No hay canciones en la lista"  
+            imagen_cancion.src = "https://via.placeholder.com/300" 
+            page.update() 
 
-    # Tarjeta superior con el campo de búsqueda y el botón de agregar
     barra_busqueda = ft.Card(
         content=ft.Container(
-            ft.Row([entrada_busqueda, boton_agregar], alignment=ft.MainAxisAlignment.CENTER, spacing=10),  # Fila con el campo y el botón
-            padding=15  # Espaciado interno
+            ft.Row([entrada_busqueda, boton_agregar], alignment=ft.MainAxisAlignment.CENTER, spacing=10), 
+            padding=15  
         ),
-        elevation=5,  # Sombra de la tarjeta
-        margin=ft.margin.only(bottom=20)  # Margen inferior
+        elevation=5,
+        margin=ft.margin.only(bottom=20) 
     )
 
-    # Tarjeta con el título, miniatura y controles de reproducción
     panel_info = ft.Card(
         content=ft.Container(
-            ft.Column([texto_titulo, imagen_cancion, controles_reproduccion],  # Columna con título, imagen y botones
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),  # Alineado y espaciado
-            padding=20  # Espaciado interno
+            ft.Column([texto_titulo, imagen_cancion, controles_reproduccion],  
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10), 
+            padding=20  
         ),
-        elevation=5,  # Sombra
-        margin=ft.margin.only(bottom=20)  # Margen inferior
+        elevation=5, 
+        margin=ft.margin.only(bottom=20)  
     )
 
-    # Tarjeta para mostrar la lista de canciones
     panel_lista = ft.Card(
         content=ft.Container(
             ft.Column([
-                ft.Text("Lista de Reproducción", size=18, weight=ft.FontWeight.BOLD),  # Título de la lista
-                ft.Divider(height=10, color=ft.colors.TRANSPARENT),  # Separador invisible para espaciado
-                lista_canciones  # Componente que contiene la lista
-            ], expand=True),  # La columna ocupa todo el espacio posible
-            padding=15  # Espaciado interno
+                ft.Text("Lista de Reproducción", size=18, weight=ft.FontWeight.BOLD),  
+                ft.Divider(height=10, color=ft.colors.TRANSPARENT),  
+                lista_canciones  
+            ], 
+            expand=True),  
+            padding=15  
         ),
-        elevation=5,  # Sombra
-        expand=True  # La tarjeta ocupa todo el espacio vertical disponible
+        elevation=5,  
+        expand=True 
+    )
+    
+    panel_contacto = ft.Container(
+        content=ft.Column(
+            controls=[
+                ft.Text("Informacion de contacto:"),
+                ft.Text("Juan Arrieta - coleyf@uninorte.edu.co"),
+                ft.Text("Jeronimo Castro - jeronimoac@uninorte.edu.co"),
+                ft.Text("Angelo De Leon - canedaa@uninorte.edu.co"),
+                ft.Text("Santiago Camacho - scarta@uninorte.edu.co"),
+            ],
+            alignment=ft.MainAxisAlignment.CENTER,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        alignment=ft.alignment.center, 
+        expand=True                    
     )
 
-    # Agregamos todos los paneles a la página principal en una columna
     page.add(
-        ft.Column([barra_busqueda, panel_info, panel_lista], expand=True, spacing=20)  # Columna con separación y expansión
+        ft.Column([barra_busqueda, panel_info, panel_lista, panel_contacto], expand=True, spacing=20)  
     )
 
-    # Cargamos la lista de reproducción desde archivo
-    lista_reproduccion.cargar(PLAYLIST_FILE)  # Intenta cargar el archivo con las canciones
-    actualizar_lista_ui()  # Refresca la lista en pantalla
+    lista_reproduccion.cargar(PLAYLIST_FILE)  
+    actualizar_lista_ui()  
 
-    # Si hay canciones, comenzamos a reproducir la actual
     if lista_reproduccion.longitud > 0:
-        tocar_actual()  # Inicia reproducción de la canción actual
+        tocar_actual() 
 
 ft.app(target=main) 
