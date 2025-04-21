@@ -13,6 +13,7 @@ import json
 import os 
 
 estado_pausado = False  
+reproduccion_id = 0 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MUSIC_FOLDER = os.path.join(BASE_DIR, "music")
@@ -320,6 +321,8 @@ def main(page: ft.Page):
     def siguiente(_=None):  
         detener()  
         lista_reproduccion.siguiente()  
+        boton_pausa.icon = ft.icons.PAUSE
+        boton_pausa.tooltip = "Pausar"
         tocar_actual()  
         actualizar_lista_ui()  
 
@@ -515,53 +518,47 @@ def main(page: ft.Page):
             return float(result.stdout.strip())
         except:
             return None  
-
+    
     def reproducir_mp3(file_path):
-        
-        global player, reproduciendo
-        
+        global player, reproduciendo, reproduccion_id
+        mi_id = reproduccion_id
+
         duracion = obtener_duracion(file_path)
-        
         if duracion is None:
-            print("¡Error! No se pudo obtener la duración. Usando valor por defecto (3 mins)")
-            duracion = 300  
-        
-        print(f"Duración detectada: {duracion:.2f} segundos")
-        
+            duracion = 300
+
         player = MediaPlayer(file_path)
         inicio = time.time()
-        
-        try:
-            reproduciendo = True     
-            tiempo_transcurrido = 0.0
 
+        try:
+            reproduciendo = True
+            tiempo_transcurrido = 0.0
             ultimo_reloj = time.time()
 
             while reproduciendo:
+                if mi_id != reproduccion_id:
+                    break
+
                 tiempo_actual = time.time()
-                
-                if not (boton_pausa.icon == ft.icons.PLAY_ARROW):
+                if boton_pausa.icon != ft.icons.PLAY_ARROW:
                     delta = tiempo_actual - ultimo_reloj
                     tiempo_transcurrido += delta
-                    
-                    if tiempo_transcurrido >= duracion - 1:
-                        print(f"Cambiando 1s antes del final (Tiempo: {tiempo_transcurrido:.2f}s)")
-                        siguiente()  
+
+                    if tiempo_transcurrido >= duracion:
+                        print("Fin de cancion")
+                        siguiente()
                         break
-                
+
                 ultimo_reloj = tiempo_actual
-                
                 time.sleep(0.1)
-        
-        except Exception as e:
-            print(f"Error: {e}")
-            siguiente()
+
         finally:
             if player:
                 player.close_player()
-            print(f"Reproducción finalizada. Tiempo total: {time.time() - inicio:.2f}s")
 
     def tocar_actual():
+        global reproduccion_id
+        reproduccion_id += 1  
         
         global reproduciendo  
 
@@ -699,4 +696,5 @@ def main(page: ft.Page):
     if lista_reproduccion.longitud > 0:
         tocar_actual() 
 
+#ft.app(target=main)
 ft.app(target=main) 
